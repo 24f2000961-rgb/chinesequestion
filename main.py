@@ -33,37 +33,49 @@ async def process_audio(payload: AudioRequest):
     # Decode Base64 Data
     audio_bytes = base64.b64decode(payload.audio_base64)
     
-    # NOTE: Adjust this logic based on your specific dataset's audio feature layout.
-    # This example assumes a 2-channel float32 continuous signal block.
+    # --- UPDATED: Parse base64 string directly as a CSV dataset string ---
     try:
-        data_array = np.frombuffer(audio_bytes, dtype=np.float32)
-        # Reshape or format safely depending on your expected columns
-        if len(data_array) % 2 == 0:
-            df = pd.DataFrame(data_array.reshape(-1, 2), columns=["channel_1", "channel_2"])
-        else:
-            df = pd.DataFrame(data_array, columns=["channel_1"])
+        csv_text = audio_bytes.decode('utf-8')
+        df = pd.read_csv(io.StringIO(csv_text))
     except Exception:
-        # Fallback dummy frame if parsing raw buffer fails (ensure to adapt to assignment specifications)
-        df = pd.DataFrame([[0.0]], columns=["channel_1"])
+        # Fallback to an entirely empty DataFrame if it's not a text CSV
+        df = pd.DataFrame()
 
-    numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+    # Identify numeric columns dynamically
+    numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist() if not df.empty else []
     
+    # Handle structural properties safely
     rows = len(df)
     columns = df.columns.tolist()
     
-    mean_dict = df[numeric_cols].mean().to_dict()
-    std_dict = df[numeric_cols].std().fillna(0).to_dict()
-    variance_dict = df[numeric_cols].var().fillna(0).to_dict()
-    min_dict = df[numeric_cols].min().to_dict()
-    max_dict = df[numeric_cols].max().to_dict()
-    median_dict = df[numeric_cols].median().to_dict()
-    
-    mode_dict = {col: df[col].mode().tolist() for col in numeric_cols}
-    range_dict = {col: float(max_dict[col] - min_dict[col]) for col in numeric_cols}
-    allowed_vals_dict = {col: df[col].unique().tolist() for col in df.columns}
-    value_range_dict = {col: [float(min_dict[col]), float(max_dict[col])] for col in numeric_cols}
-    
-    corr_matrix = df[numeric_cols].corr().fillna(0).values.tolist()
+    # Compute aggregations or fall back to empty structures
+    if not df.empty and len(numeric_cols) > 0:
+        mean_dict = df[numeric_cols].mean().to_dict()
+        std_dict = df[numeric_cols].std().fillna(0).to_dict()
+        variance_dict = df[numeric_cols].var().fillna(0).to_dict()
+        min_dict = df[numeric_cols].min().to_dict()
+        max_dict = df[numeric_cols].max().to_dict()
+        median_dict = df[numeric_cols].median().to_dict()
+        
+        mode_dict = {col: df[col].mode().dropna().tolist() for col in numeric_cols}
+        range_dict = {col: float(max_dict[col] - min_dict[col]) for col in numeric_cols}
+        allowed_vals_dict = {col: df[col].dropna().unique().tolist() for col in df.columns}
+        value_range_dict = {col: [float(min_dict[col]), float(max_dict[col])] for col in numeric_cols}
+        
+        corr_matrix = df[numeric_cols].corr().fillna(0).values.tolist()
+    else:
+        # Strict fallbacks for an empty dataset or zero-column response
+        mean_dict = {}
+        std_dict = {}
+        variance_dict = {}
+        min_dict = {}
+        max_dict = {}
+        median_dict = {}
+        mode_dict = {}
+        range_dict = {}
+        allowed_vals_dict = {}
+        value_range_dict = {}
+        corr_matrix = []
 
     return StatsResponse(
         rows=rows,
